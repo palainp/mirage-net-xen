@@ -190,6 +190,25 @@ module Make(Xs: Xs_client_lwt.S) = struct
       )
     )
 
+  let wait_until_backend_initialised conf =
+    Xs.make () >>= fun xsc ->
+    Xs.wait xsc (fun h ->
+      Lwt.catch
+        (fun () ->
+          Xs.read h (conf.backend / "state") >>= fun state ->
+          let open Xen_os.Device_state in
+          match of_string state with
+          | InitWait | Initialised -> return ()
+          | Closed        (* XXX: stop waiting? *)
+          | Reconfigured  (* XXX: stop waiting? *)
+          | _  -> fail Xs_protocol.Eagain
+        )
+        (function
+          | Xs_protocol.Enoent _ -> fail Xs_protocol.Eagain
+          | ex -> fail ex
+        )
+    )
+
   let wait_until_backend_connected conf =
     Xs.make () >>= fun xsc ->
     Xs.wait xsc (fun h ->

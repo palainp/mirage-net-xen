@@ -57,6 +57,7 @@ module type CONFIGURATION = sig
   val disconnect_backend: id -> unit Lwt.t
   (** Delete the backend directory. *)
 
+  val wait_until_backend_initialised: backend_configuration -> unit Lwt.t
   val wait_until_backend_connected: backend_configuration -> unit Lwt.t
 
   val read_backend: id -> backend_configuration Lwt.t

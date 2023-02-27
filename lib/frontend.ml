@@ -121,17 +121,25 @@ module Make(C: S.CONFIGURATION) = struct
         smart_poll = false;
       };
     } in
+    Log.info (fun f -> f "waiting backend to be ready");
+    C.wait_until_backend_initialised backend_conf >>= fun () ->
+    Log.info (fun f -> f "writing frontend configuration");
     C.write_frontend_configuration id front_conf >>= fun () ->
+    Log.info (fun f -> f "connecting frontend");
     C.connect id >>= fun () ->
     (* Wait for backend to accept connection *)
     let rx_map = Hashtbl.create 1 in
+    Log.info (fun f -> f "waiting backend to accept connection");
     C.wait_until_backend_connected backend_conf >>= fun () ->
     Xen_os.Eventchn.unmask h evtchn;
     let stats = Stats.create () in
+    Log.info (fun f -> f "exporting grant page");
     let grant_tx_page = Export.grant_access ~domid:backend_id ~writable:false in
+    Log.info (fun f -> f "sharing grant page");
     let tx_pool = Shared_page_pool.make grant_tx_page in
     (* Register callback activation *)
     let backend = backend_conf.S.backend in
+    Log.info (fun f -> f "reading our MUT");
     C.read_mtu id >>= fun mtu ->
     return { vif_id; backend_id; tx_client; tx_gnt; tx_mutex; tx_pool;
              rx_gnt; rx_fring; rx_client; rx_map; rx_id = 0 ; stats;
