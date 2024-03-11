@@ -13,26 +13,29 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open Sexplib.Std
 
 type id = [
 | `Client of int (* device id *)
 | `Server of int * int (* domid * device id *)
-] [@@deriving sexp]
+]
+
+let of_id = function
+  | `Client i -> "Client " ^ Int.to_string i
+  | `Server (domid, i) -> "Server " ^ Int.to_string domid ^ " " ^ Int.to_string i
 
 type backend_configuration = {
   frontend_id: int;
   backend_id: int;
   backend: string;
   features_available: Features.t;
-} [@@deriving sexp]
+}
 
 type frontend_configuration = {
   tx_ring_ref: int32;
   rx_ring_ref: int32;
   event_channel: string;
   feature_requests: Features.t;
-} [@@deriving sexp]
+}
 
 module type CONFIGURATION = sig
   val read_frontend_mac: id -> Macaddr.t Lwt.t

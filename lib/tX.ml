@@ -15,8 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-[@@@ocaml.warning "-32"]  (* cstruct ppx generates unused values *)
-
 module Request = struct
   type error = { impossible : 'a. 'a }
 
@@ -33,15 +31,16 @@ module Request = struct
     size: int;
   }
 
-  [%%cstruct
-  type req = {
-    gref: uint32_t;
-    offset: uint16_t;
-    flags: uint16_t;
-    id: uint16_t;
-    size: uint16_t;
-  } [@@little_endian]
-  ]
+  let get_req_gref b = Cstruct.LE.get_uint32 b 0
+  let get_req_offset b = Cstruct.LE.get_uint16 b 4
+  let get_req_flags b = Cstruct.LE.get_uint16 b 6
+  let get_req_id b = Cstruct.LE.get_uint16 b 8
+  let get_req_size b = Cstruct.LE.get_uint16 b 10
+  let set_req_gref b = Cstruct.LE.set_uint32 b 0
+  let set_req_offset b = Cstruct.LE.set_uint16 b 4
+  let set_req_flags b = Cstruct.LE.set_uint16 b 6
+  let set_req_id b = Cstruct.LE.set_uint16 b 8
+  let set_req_size b = Cstruct.LE.set_uint16 b 10
 
   let write t slot =
     let flags = Flags.to_int t.flags in
@@ -72,25 +71,35 @@ module Request = struct
 end
 
 module Response = struct
-  [%%cenum
   type status =
-    | DROPPED [@id 0xfffe]
-    | ERROR   [@id 0xffff]
-    | OKAY    [@id 0]
-    | NULL    [@id 1]
-    [@@int16_t]
-  ]
+  | DROPPED
+  | ERROR
+  | OKAY
+  | NULL
+
   type t = {
     id: int;
     status: status;
   }
 
-  [%%cstruct
-  type resp = {
-    id: uint16_t;
-    status: uint16_t;
-  } [@@little_endian]
-  ]
+  let get_resp_id b = Cstruct.LE.get_uint16 b 0
+  let get_resp_status b = Cstruct.LE.get_uint16 b 2
+  let set_resp_id b = Cstruct.LE.set_uint16 b 0
+  let set_resp_status b = Cstruct.LE.set_uint16 b 2
+
+  let status_to_int = function
+  | DROPPED -> 0xfffe
+  | ERROR   -> 0xffff
+  | OKAY    -> 0
+  | NULL    -> 1
+
+  let int_to_status = function
+  | 0xfffe -> Some DROPPED
+  | 0xffff -> Some ERROR
+  | 0 -> Some OKAY
+  | 1 -> Some NULL
+  | _ -> None
+
   let write t slot =
     set_resp_id slot t.id;
     set_resp_status slot (status_to_int t.status)
@@ -103,5 +112,5 @@ module Response = struct
     | Some status -> { id; status }
 end
 
-let total_size = max Request.sizeof_req Response.sizeof_resp
+let total_size = 12
 let () = assert(total_size = 12)

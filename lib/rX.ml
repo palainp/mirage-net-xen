@@ -16,21 +16,16 @@
  *)
 open Sexplib.Std
 
-[@@@ocaml.warning "-32"]  (* cstruct ppx generates unused values *)
-
 module Request = struct
   type t = {
     id: int;
     gref: int32;
   } [@@deriving sexp]
 
-  [%%cstruct
-  type req = {
-    id: uint16_t;
-    _padding: uint16_t;
-    gref: uint32_t;
-  } [@@little_endian]
-  ]
+  let get_req_id b = Cstruct.LE.get_uint16 b 0
+  let get_req_gref b = Cstruct.LE.get_uint32 b 4
+  let set_req_id b = Cstruct.LE.set_uint16 b 0
+  let set_req_gref b = Cstruct.LE.set_uint32 b 4
 
   let write t slot =
     set_req_id slot t.id;
@@ -52,14 +47,14 @@ module Response = struct
     size: (int, error) result;
   }
 
-  [%%cstruct
-  type resp = {
-    id: uint16_t;
-    offset: uint16_t;
-    flags: uint16_t;
-    status: uint16_t;  (* Negative => Err, else Size *)
-  } [@@little_endian]
-  ]
+  let get_resp_id b = Cstruct.LE.get_uint16 b 0
+  let get_resp_offset b = Cstruct.LE.get_uint16 b 2
+  let get_resp_flags b = Cstruct.LE.get_uint16 b 4
+  let get_resp_status b = Cstruct.LE.get_uint16 b 6
+  let set_resp_id b = Cstruct.LE.set_uint16 b 0
+  let set_resp_offset b = Cstruct.LE.set_uint16 b 2
+  let set_resp_flags b = Cstruct.LE.set_uint16 b 4
+  let set_resp_status b = Cstruct.LE.set_uint16 b 6
 
   let within_page name x =
     if x < 0 || x > 4096
@@ -94,5 +89,4 @@ module Response = struct
   let size t = t.size
 end
 
-let total_size = max Request.sizeof_req Response.sizeof_resp
-let () = assert(total_size = 8)
+let total_size = 8
