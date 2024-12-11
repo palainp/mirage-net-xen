@@ -29,6 +29,6 @@ let supported = {
   sg = true;
   (* FIXME: not sure about these *)
   rx_flip = false;
-  gso_tcpv4 = false;
+  gso_tcpv4 = true;
   smart_poll = false;
 }

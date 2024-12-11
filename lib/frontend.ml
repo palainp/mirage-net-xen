@@ -117,7 +117,7 @@ module Make(C: S.CONFIGURATION) = struct
         rx_flip = false;
         rx_notify = true;
         sg = true;
-        gso_tcpv4 = false;
+        gso_tcpv4 = true;
         smart_poll = false;
       };
     } in
