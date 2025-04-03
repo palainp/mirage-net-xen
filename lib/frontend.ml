@@ -25,15 +25,14 @@ module Log = (val Logs.src_log src : Logs.LOG)
 let return = Lwt.return
 
 let allocate_ring ~domid =
-  let page = Io_page.get 1 in
-  let x = Io_page.to_cstruct page in
+  let page = Io_page.get ~n:1 () in
   Export.get ()
   >>= fun gnt ->
-  for i = 0 to Cstruct.length x - 1 do
-    Cstruct.set_uint8 x i 0
+  for i = 0 to Io_page.length page - 1 do
+    Io_page.set_uint8 page i 0
   done;
   Export.grant_access ~domid ~writable:true gnt page;
-  return (gnt, x)
+  return (gnt, page)
 
 let create_ring ~domid ~idx_size name =
   allocate_ring ~domid
@@ -162,7 +161,7 @@ module Make(C: S.CONFIGURATION) = struct
            Hashtbl.add nf.rx_map id (gref, page);
            let slot_id = Ring.Rpc.Front.next_req_id nf.rx_fring in
            let slot = Ring.Rpc.Front.slot nf.rx_fring slot_id in
-           ignore(RX.Request.(write {id; gref = Gntref.to_int32 gref}) slot)
+           ignore(RX.Request.(write {id; gref = Gntref.to_int32 gref}) (Cstruct.of_bigarray slot.buffer))
         ) (List.combine grefs pages);
       if Ring.Rpc.Front.push_requests_and_check_notify nf.rx_fring
       then notify nf ();
@@ -179,7 +178,7 @@ module Make(C: S.CONFIGURATION) = struct
     let module Recv = Assemble.Make(RX.Response) in
     let q = ref [] in
     Ring.Rpc.Front.ack_responses nf.rx_fring (fun slot ->
-      match RX.Response.read slot with
+      match RX.Response.read (Cstruct.of_bigarray slot.buffer) with
       | Error msg -> failwith msg
       | Ok req -> q := req :: !q
     );
@@ -198,7 +197,7 @@ module Make(C: S.CONFIGURATION) = struct
           frame.Recv.fragments |> Lwt_list.iter_s (fun {Recv.size; msg} ->
             let {RX.Response.id; size = _; flags = _; offset} = msg in
             pop_rx_page nf id >|= fun page ->
-            let buf = Io_page.to_cstruct page in
+            let buf = Cstruct.of_bigarray page.buffer in
             Cstruct.blit buf offset data !next size;
             next := !next + size
           ) >|= fun () ->
@@ -210,7 +209,7 @@ module Make(C: S.CONFIGURATION) = struct
 
   let tx_poll nf =
     Lwt_ring.Front.poll nf.tx_client (fun slot ->
-      let resp = TX.Response.read slot in
+      let resp = TX.Response.read (Cstruct.of_bigarray slot.buffer) in
       (resp.TX.Response.id, resp)
     )
 
@@ -268,6 +267,7 @@ module Make(C: S.CONFIGURATION) = struct
    * been ack'd by netback. *)
   let write_request ?size ~flags nf datav =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
+      let shared_block = Cstruct.of_bigarray shared_block.buffer in
       let len, datav = Cstruct.fillv ~src:datav ~dst:shared_block in
       (* [size] includes extra pages to follow later *)
       let size = match size with |None -> len |Some s -> s in
@@ -280,7 +280,7 @@ module Make(C: S.CONFIGURATION) = struct
         size
       } in
       Lwt_ring.Front.write nf.t.tx_client
-          (fun slot -> TX.Request.write request slot; id) >>= fun replied ->
+          (fun slot -> TX.Request.write request (Cstruct.of_bigarray slot.buffer); id) >>= fun replied ->
       (* request has been written; when replied returns we have a reply *)
       let release = replied >>= fun reply ->
         let open TX.Response in
@@ -296,6 +296,7 @@ module Make(C: S.CONFIGURATION) = struct
    * The buffer's data must fit in a single block. *)
   let write_already_locked nf ~size fillf =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
+        let shared_block = Cstruct.of_bigarray shared_block.buffer in
         Cstruct.memset shared_block 0;
         let len = fillf (Cstruct.sub shared_block 0 size) in
         if len > size then failwith "length exceeds size" ;
@@ -308,7 +309,7 @@ module Make(C: S.CONFIGURATION) = struct
           size = len
         } in
         Lwt_ring.Front.write nf.t.tx_client
-          (fun slot -> TX.Request.write request slot; id) >>= fun replied ->
+          (fun slot -> TX.Request.write request (Cstruct.of_bigarray slot.buffer); id) >>= fun replied ->
         (* request has been written; when replied returns we have a reply *)
         let release = replied >>= fun reply ->
           let open TX.Response in
