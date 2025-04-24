@@ -25,7 +25,7 @@ module Log = (val Logs.src_log src : Logs.LOG)
 let return = Lwt.return
 
 let allocate_ring ~domid =
-  let page = Io_page.get ~n:1 () in
+  let page = Io_page.get 1 in
   Export.get ()
   >>= fun gnt ->
   for i = 0 to Io_page.length page - 1 do

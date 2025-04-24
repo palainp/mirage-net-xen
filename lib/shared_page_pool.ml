@@ -56,7 +56,7 @@ let shutdown t =
   (* Otherwise, shutdown gets called again when in_use becomes 0 *)
 
 let alloc t =
-  let page = Io_page.get ~n:1 () in
+  let page = Io_page.get 1 in
   (* (the Xen version of caml_alloc_pages clears the page, so we don't have to) *)
   Export.get () >>= fun gnt ->
   t.grant gnt page;
