@@ -31,16 +31,16 @@ module Request = struct
     size: int;
   }
 
-  let get_req_gref c = Cstruct.LE.get_uint32 c 0
-  let set_req_gref c gref = Cstruct.LE.set_uint32 c 0 gref
-  let get_req_offset c = Cstruct.LE.get_uint16 c 4
-  let set_req_offset c off = Cstruct.LE.set_uint16 c 4 off
-  let get_req_flags c = Cstruct.LE.get_uint16 c 6
-  let set_req_flags c flags = Cstruct.LE.set_uint16 c 6 flags
-  let get_req_id c = Cstruct.LE.get_uint16 c 8
-  let set_req_id c id = Cstruct.LE.set_uint16 c 8 id
-  let get_req_size c = Cstruct.LE.get_uint16 c 10
-  let set_req_size c size = Cstruct.LE.set_uint16 c 10 size
+  let get_req_gref c = Io_page.get_le_uint32 c 0
+  let set_req_gref c gref = Io_page.set_le_uint32 c 0 gref
+  let get_req_offset c = Io_page.get_le_uint16 c 4
+  let set_req_offset c off = Io_page.set_le_uint16 c 4 off
+  let get_req_flags c = Io_page.get_le_uint16 c 6
+  let set_req_flags c flags = Io_page.set_le_uint16 c 6 flags
+  let get_req_id c = Io_page.get_le_uint16 c 8
+  let set_req_id c id = Io_page.set_le_uint16 c 8 id
+  let get_req_size c = Io_page.get_le_uint16 c 10
+  let set_req_size c size = Io_page.set_le_uint16 c 10 size
   let sizeof_req = 12
 
   let write t slot =
@@ -96,10 +96,10 @@ module Response = struct
     status: status;
   }
 
-  let get_resp_id c = Cstruct.LE.get_uint16 c 0
-  let set_resp_id c id = Cstruct.LE.set_uint16 c 0 id
-  let get_resp_status c = Cstruct.LE.get_uint16 c 2
-  let set_resp_status c status = Cstruct.LE.set_uint16 c 2 status
+  let get_resp_id c = Io_page.get_le_uint16 c 0
+  let set_resp_id c id = Io_page.set_le_uint16 c 0 id
+  let get_resp_status c = Io_page.get_le_uint16 c 2
+  let set_resp_status c status = Io_page.set_le_uint16 c 2 status
   let sizeof_resp = 4
 
   let write t slot =

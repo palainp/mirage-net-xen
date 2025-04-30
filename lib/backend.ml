@@ -149,7 +149,6 @@ module Make(C: S.CONFIGURATION) = struct
       let q = ref [] in
       Ring.Rpc.Back.ack_requests (from_netfront ())
         (fun slot ->
-          let slot = Cstruct.of_bigarray (slot.buffer) in
           match TX.Request.read slot with
           | Error msg -> Log.warn (fun f -> f "read_read TX has unparseable request: %s" msg)
           | Ok req ->
@@ -177,7 +176,7 @@ module Make(C: S.CONFIGURATION) = struct
                     let ring = from_netfront () in
                     Ring.Rpc.Back.(slot ring (next_res_id ring)) in
                   let resp = { TX.Response.id; status = TX.Response.OKAY } in
-                  TX.Response.write resp (Cstruct.of_bigarray slot.buffer);
+                  TX.Response.write resp slot;
                   return ()
                 )
               >|= function

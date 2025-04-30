@@ -209,7 +209,7 @@ module Make(C: S.CONFIGURATION) = struct
 
   let tx_poll nf =
     Lwt_ring.Front.poll nf.tx_client (fun slot ->
-      let resp = TX.Response.read (Cstruct.of_bigarray slot.buffer) in
+      let resp = TX.Response.read slot in
       (resp.TX.Response.id, resp)
     )
 
@@ -267,20 +267,19 @@ module Make(C: S.CONFIGURATION) = struct
    * been ack'd by netback. *)
   let write_request ?size ~flags nf datav =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
-      let shared_block = Cstruct.of_bigarray shared_block.buffer in
-      let len, datav = Cstruct.fillv ~src:datav ~dst:shared_block in
+      let len, datav = Cstruct.fillv ~src:datav ~dst:(Cstruct.of_bigarray shared_block.buffer) in
       (* [size] includes extra pages to follow later *)
       let size = match size with |None -> len |Some s -> s in
       Stats.tx nf.t.stats (Int64.of_int size);
       let request = { TX.Request.
         id;
         gref = Gntref.to_int32 gref;
-        offset = shared_block.Cstruct.off;
+        offset = shared_block.Io_page.off;
         flags;
         size
       } in
       Lwt_ring.Front.write nf.t.tx_client
-          (fun slot -> TX.Request.write request (Cstruct.of_bigarray slot.buffer); id) >>= fun replied ->
+          (fun slot -> TX.Request.write request slot; id) >>= fun replied ->
       (* request has been written; when replied returns we have a reply *)
       let release = replied >>= fun reply ->
         let open TX.Response in
@@ -296,20 +295,21 @@ module Make(C: S.CONFIGURATION) = struct
    * The buffer's data must fit in a single block. *)
   let write_already_locked nf ~size fillf =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
-        let shared_block = Cstruct.of_bigarray shared_block.buffer in
-        Cstruct.memset shared_block 0;
-        let len = fillf (Cstruct.sub shared_block 0 size) in
+        (* Here we'll have shared_block and cs_shared_block pointing to the same memory area... *)
+        let cs_shared_block = Cstruct.of_bigarray shared_block.buffer in
+        Cstruct.memset cs_shared_block 0;
+        let len = fillf (Cstruct.sub cs_shared_block 0 size) in
         if len > size then failwith "length exceeds size" ;
         Stats.tx nf.t.stats (Int64.of_int len);
         let request = { TX.Request.
           id;
           gref = Gntref.to_int32 gref;
-          offset = shared_block.Cstruct.off;
+          offset = shared_block.Io_page.off;
           flags = Flags.empty;
           size = len
         } in
         Lwt_ring.Front.write nf.t.tx_client
-          (fun slot -> TX.Request.write request (Cstruct.of_bigarray slot.buffer); id) >>= fun replied ->
+          (fun slot -> TX.Request.write request slot; id) >>= fun replied ->
         (* request has been written; when replied returns we have a reply *)
         let release = replied >>= fun reply ->
           let open TX.Response in
