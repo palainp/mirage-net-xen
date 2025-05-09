@@ -24,6 +24,9 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let return = Lwt.return
 
+let cs_of_io_page page =
+  Cstruct.of_bigarray ~off:page.Io_page.off ~len:page.Io_page.len page.Io_page.buffer
+
 let allocate_ring ~domid =
   let page = Io_page.get 1 in
   Export.get ()
@@ -161,7 +164,7 @@ module Make(C: S.CONFIGURATION) = struct
            Hashtbl.add nf.rx_map id (gref, page);
            let slot_id = Ring.Rpc.Front.next_req_id nf.rx_fring in
            let slot = Ring.Rpc.Front.slot nf.rx_fring slot_id in
-           ignore(RX.Request.(write {id; gref = Gntref.to_int32 gref}) (Cstruct.of_bigarray slot.buffer))
+           ignore(RX.Request.(write {id; gref = Gntref.to_int32 gref}) (cs_of_io_page slot))
         ) (List.combine grefs pages);
       if Ring.Rpc.Front.push_requests_and_check_notify nf.rx_fring
       then notify nf ();
@@ -178,7 +181,7 @@ module Make(C: S.CONFIGURATION) = struct
     let module Recv = Assemble.Make(RX.Response) in
     let q = ref [] in
     Ring.Rpc.Front.ack_responses nf.rx_fring (fun slot ->
-      match RX.Response.read (Cstruct.of_bigarray ~off:slot.off ~len:slot.len slot.buffer) with
+      match RX.Response.read (cs_of_io_page slot) with
       | Error msg -> failwith msg
       | Ok req -> q := req :: !q
     );
@@ -197,7 +200,7 @@ module Make(C: S.CONFIGURATION) = struct
           frame.Recv.fragments |> Lwt_list.iter_s (fun {Recv.size; msg} ->
             let {RX.Response.id; size = _; flags = _; offset} = msg in
             pop_rx_page nf id >|= fun page ->
-            let buf = Cstruct.of_bigarray page.buffer in
+            let buf = cs_of_io_page page in
             Cstruct.blit buf offset data !next size;
             next := !next + size
           ) >|= fun () ->
@@ -267,7 +270,7 @@ module Make(C: S.CONFIGURATION) = struct
    * been ack'd by netback. *)
   let write_request ?size ~flags nf datav =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
-      let len, datav = Cstruct.fillv ~src:datav ~dst:(Cstruct.of_bigarray shared_block.buffer) in
+      let len, datav = Cstruct.fillv ~src:datav ~dst:(cs_of_io_page shared_block) in
       (* [size] includes extra pages to follow later *)
       let size = match size with |None -> len |Some s -> s in
       Stats.tx nf.t.stats (Int64.of_int size);
@@ -296,7 +299,7 @@ module Make(C: S.CONFIGURATION) = struct
   let write_already_locked nf ~size fillf =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
         (* Here we'll have shared_block and cs_shared_block pointing to the same memory area... *)
-        let cs_shared_block = Cstruct.of_bigarray shared_block.buffer in
+        let cs_shared_block = cs_of_io_page shared_block in
         Cstruct.memset cs_shared_block 0;
         let len = fillf (Cstruct.sub cs_shared_block 0 size) in
         if len > size then failwith "length exceeds size" ;

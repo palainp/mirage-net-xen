@@ -27,6 +27,9 @@ module Log = (val Logs.src_log src : Logs.LOG)
 
 let return = Lwt.return
 
+let cs_of_io_page page =
+  Cstruct.of_bigarray ~off:page.Io_page.off ~len:page.Io_page.len page.Io_page.buffer
+
 module Cleanup : sig
   type t
   (** A stack of (cleanup) actions to perform.
@@ -170,7 +173,7 @@ module Make(C: S.CONFIGURATION) = struct
               } in
               Import.with_mapping gnt ~writable:false (fun mapping ->
                   let buf = Import.Local_mapping.to_buf mapping in
-                  Cstruct.blit (Cstruct.of_bigarray buf.buffer) offset data !next size;
+                  Cstruct.blit (cs_of_io_page buf) offset data !next size;
                   next := !next + size;
                   let slot =
                     let ring = from_netfront () in
@@ -218,7 +221,7 @@ module Make(C: S.CONFIGURATION) = struct
       else begin
         Ring.Rpc.Back.ack_requests (to_netfront t)
           (fun slot ->
-            let req = RX.Request.read (Cstruct.of_bigarray slot.buffer) in
+            let req = RX.Request.read (cs_of_io_page slot) in
             ignore(Lwt_dllist.add_r req t.rx_reqs)
           );
         if Lwt_dllist.length t.rx_reqs <> n'
@@ -244,7 +247,7 @@ module Make(C: S.CONFIGURATION) = struct
                let gnt = {Import.domid = t.frontend_id; ref = Gntref.of_int32 r.RX.Request.gref} in
                let mapping = Import.map_exn gnt ~writable:true in
                let dst = Import.Local_mapping.to_buf mapping in
-               let dst = Cstruct.of_bigarray dst.buffer in
+               let dst = cs_of_io_page dst in
                Cstruct.memset dst 0;
                let len = fillf (Cstruct.sub dst 0 size) in
                Import.Local_mapping.unmap_exn mapping;
@@ -255,7 +258,7 @@ module Make(C: S.CONFIGURATION) = struct
                let size = Ok len in
                let flags = Flags.empty in
                let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size } in
-               RX.Response.write resp (Cstruct.of_bigarray slot.buffer);
+               RX.Response.write resp (cs_of_io_page slot);
                Stats.tx t.stats (Int64.of_int len);
                return ()
              | reqs ->
@@ -264,7 +267,7 @@ module Make(C: S.CONFIGURATION) = struct
                    let gnt = {Import.domid = t.frontend_id; ref = Gntref.of_int32 r.RX.Request.gref} in
                    let mapping = Import.map_exn gnt ~writable:true in
                    let dst = Import.Local_mapping.to_buf mapping in
-                   let dst = Cstruct.of_bigarray dst.buffer in
+                   let dst = cs_of_io_page dst in
                    let len, src = Cstruct.fillv ~src ~dst in
                    Import.Local_mapping.unmap_exn mapping;
                    let slot =
@@ -273,7 +276,7 @@ module Make(C: S.CONFIGURATION) = struct
                    let size = Ok (if is_first then size else len) in
                    let flags = if rs = [] then Flags.empty else Flags.more_data in
                    let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size } in
-                   RX.Response.write resp (Cstruct.of_bigarray slot.buffer);
+                   RX.Response.write resp (cs_of_io_page slot);
                    fill_reqs ~src ~is_first:false rs
                  | [] when Cstruct.lenv src = 0 -> ()
                  | [] -> failwith "BUG: not enough pages for data!" in
