@@ -178,7 +178,7 @@ module Make(C: S.CONFIGURATION) = struct
     let module Recv = Assemble.Make(RX.Response) in
     let q = ref [] in
     Ring.Rpc.Front.ack_responses nf.rx_fring (fun slot ->
-      match RX.Response.read (Cstruct.of_bigarray ~off:slot.off ~len:slot.len slot.buffer) with
+      match RX.Response.read slot with
       | Error msg -> failwith msg
       | Ok req -> q := req :: !q
     );
