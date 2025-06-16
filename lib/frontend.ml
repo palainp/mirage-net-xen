@@ -298,11 +298,14 @@ module Make(C: S.CONFIGURATION) = struct
    * The buffer's data must fit in a single block. *)
   let write_already_locked nf ~size fillf =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
-        (* Here we'll have shared_block and cs_shared_block pointing to the same memory area... *)
+        (* Here shared_block and cs_shared_block do not point to the same memory area... *)
         let cs_shared_block = cs_of_io_page shared_block in
         Cstruct.memset cs_shared_block 0;
         let len = fillf (Cstruct.sub cs_shared_block 0 size) in
         if len > size then failwith "length exceeds size" ;
+        (* ... so we need to copy back :( *)
+        Io_page.string_blit (Cstruct.to_string cs_shared_block) 0 shared_block 0 size ;
+
         Stats.tx nf.t.stats (Int64.of_int len);
         let request = { TX.Request.
           id;
