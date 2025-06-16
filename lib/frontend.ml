@@ -200,6 +200,8 @@ module Make(C: S.CONFIGURATION) = struct
           frame.Recv.fragments |> Lwt_list.iter_s (fun {Recv.size; msg} ->
             let {RX.Response.id; size = _; flags = _; offset} = msg in
             pop_rx_page nf id >|= fun page ->
+            (* This is two copies if we want to be agnostic of the Cstruct backend.
+               Otherwise Io_page.blit_to_bytes page offset data.Cstruct.buffer !next size *)
             let buf = cs_of_io_page page in
             Cstruct.blit buf offset data !next size;
             next := !next + size
