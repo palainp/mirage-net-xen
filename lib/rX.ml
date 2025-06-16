@@ -21,10 +21,10 @@ module Request = struct
     gref: int32;
   }
 
-  let get_req_id c = Cstruct.LE.get_uint16 c 0
-  let set_req_id c id = Cstruct.LE.set_uint16 c 0 id
-  let get_req_gref c = Cstruct.LE.get_uint32 c 4
-  let set_req_gref c gref = Cstruct.LE.set_uint32 c 4 gref
+  let get_req_id c = Io_page.get_le_uint16 c 0
+  let set_req_id c id = Io_page.set_le_uint16 c 0 id
+  let get_req_gref c = Io_page.get_le_uint32 c 4
+  let set_req_gref c gref = Io_page.set_le_uint32 c 4 gref
   let sizeof_req = 8
 
   let write t slot =
@@ -47,14 +47,14 @@ module Response = struct
     size: (int, error) result;
   }
 
-  let get_resp_id c = Cstruct.LE.get_uint16 c 0
-  let set_resp_id c id = Cstruct.LE.set_uint16 c 0 id
-  let get_resp_offset c = Cstruct.LE.get_uint16 c 2
-  let set_resp_offset c off = Cstruct.LE.set_uint16 c 2 off
-  let get_resp_flags c = Cstruct.LE.get_uint16 c 4
-  let set_resp_flags c fl = Cstruct.LE.set_uint16 c 4 fl
-  let get_resp_status c = Cstruct.LE.get_uint16 c 6
-  let set_resp_status c s = Cstruct.LE.set_uint16 c 6 s
+  let get_resp_id c = Io_page.get_le_uint16 c 0
+  let set_resp_id c id = Io_page.set_le_uint16 c 0 id
+  let get_resp_offset c = Io_page.get_le_uint16 c 2
+  let set_resp_offset c off = Io_page.set_le_uint16 c 2 off
+  let get_resp_flags c = Io_page.get_le_uint16 c 4
+  let set_resp_flags c fl = Io_page.set_le_uint16 c 4 fl
+  let get_resp_status c = Io_page.get_le_uint16 c 6
+  let set_resp_status c s = Io_page.set_le_uint16 c 6 s
   let sizeof_resp = 8
 
   let within_page name x =

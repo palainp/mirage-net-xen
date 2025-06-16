@@ -21,9 +21,9 @@ module Request : sig
     gref: int32;
   } [@@deriving sexp]
 
-  val write: t -> Cstruct.t -> unit
+  val write: t -> Io_page.t -> unit
 
-  val read: Cstruct.t -> t
+  val read: Io_page.t -> t
 end
 
 module Response : sig
@@ -36,9 +36,9 @@ module Response : sig
     size: (int, error) result;
   }
 
-  val read: Cstruct.t -> (t, string) result
+  val read: Io_page.t -> (t, string) result
 
-  val write: t -> Cstruct.t -> unit
+  val write: t -> Io_page.t -> unit
 
   val flags: t -> Flags.t
 

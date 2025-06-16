@@ -164,7 +164,7 @@ module Make(C: S.CONFIGURATION) = struct
            Hashtbl.add nf.rx_map id (gref, page);
            let slot_id = Ring.Rpc.Front.next_req_id nf.rx_fring in
            let slot = Ring.Rpc.Front.slot nf.rx_fring slot_id in
-           ignore(RX.Request.(write {id; gref = Gntref.to_int32 gref}) (cs_of_io_page slot))
+           ignore(RX.Request.(write {id; gref = Gntref.to_int32 gref}) slot)
         ) (List.combine grefs pages);
       if Ring.Rpc.Front.push_requests_and_check_notify nf.rx_fring
       then notify nf ();
@@ -181,7 +181,7 @@ module Make(C: S.CONFIGURATION) = struct
     let module Recv = Assemble.Make(RX.Response) in
     let q = ref [] in
     Ring.Rpc.Front.ack_responses nf.rx_fring (fun slot ->
-      match RX.Response.read (cs_of_io_page slot) with
+      match RX.Response.read slot with
       | Error msg -> failwith msg
       | Ok req -> q := req :: !q
     );

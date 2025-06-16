@@ -221,7 +221,7 @@ module Make(C: S.CONFIGURATION) = struct
       else begin
         Ring.Rpc.Back.ack_requests (to_netfront t)
           (fun slot ->
-            let req = RX.Request.read (cs_of_io_page slot) in
+            let req = RX.Request.read slot in
             ignore(Lwt_dllist.add_r req t.rx_reqs)
           );
         if Lwt_dllist.length t.rx_reqs <> n'
@@ -258,7 +258,7 @@ module Make(C: S.CONFIGURATION) = struct
                let size = Ok len in
                let flags = Flags.empty in
                let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size } in
-               RX.Response.write resp (cs_of_io_page slot);
+               RX.Response.write resp slot;
                Stats.tx t.stats (Int64.of_int len);
                return ()
              | reqs ->
@@ -276,7 +276,7 @@ module Make(C: S.CONFIGURATION) = struct
                    let size = Ok (if is_first then size else len) in
                    let flags = if rs = [] then Flags.empty else Flags.more_data in
                    let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size } in
-                   RX.Response.write resp (cs_of_io_page slot);
+                   RX.Response.write resp slot;
                    fill_reqs ~src ~is_first:false rs
                  | [] when Cstruct.lenv src = 0 -> ()
                  | [] -> failwith "BUG: not enough pages for data!" in
