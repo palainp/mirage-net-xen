@@ -247,9 +247,10 @@ module Make(C: S.CONFIGURATION) = struct
                let gnt = {Import.domid = t.frontend_id; ref = Gntref.of_int32 r.RX.Request.gref} in
                let mapping = Import.map_exn gnt ~writable:true in
                let dst = Import.Local_mapping.to_buf mapping in
-               let dst = cs_of_io_page dst in
-               Cstruct.memset dst 0;
-               let len = fillf (Cstruct.sub dst 0 size) in
+               (* Here we need to fillf into a fresh cs, and then copy the data back into the shared_block *)
+               let cs = Cstruct.create size in (* create set the buffer to 0 *)
+               let len = fillf cs in
+               Io_page.string_blit (Cstruct.to_string cs) 0 dst 0 size ;
                Import.Local_mapping.unmap_exn mapping;
                if len > size then failwith "length exceeds total size" ;
                let slot =
@@ -267,8 +268,10 @@ module Make(C: S.CONFIGURATION) = struct
                    let gnt = {Import.domid = t.frontend_id; ref = Gntref.of_int32 r.RX.Request.gref} in
                    let mapping = Import.map_exn gnt ~writable:true in
                    let dst = Import.Local_mapping.to_buf mapping in
-                   let dst = cs_of_io_page dst in
-                   let len, src = Cstruct.fillv ~src ~dst in
+                   (* Here we need to fillv into a fresh cs, and then copy the data back into the shared_block *)
+                   let cs = Cstruct.create size in
+                   let len, src = Cstruct.fillv ~src ~dst:cs in
+                   Io_page.string_blit (Cstruct.to_string cs) 0 dst 0 size ;
                    Import.Local_mapping.unmap_exn mapping;
                    let slot =
                      let ring = to_netfront t in

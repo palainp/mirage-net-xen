@@ -272,7 +272,10 @@ module Make(C: S.CONFIGURATION) = struct
    * been ack'd by netback. *)
   let write_request ?size ~flags nf datav =
     Shared_page_pool.use nf.t.tx_pool (fun ~id gref shared_block ->
-      let len, datav = Cstruct.fillv ~src:datav ~dst:(cs_of_io_page shared_block) in
+      let cs_shared_block = cs_of_io_page shared_block in
+      (* Here we need to fillv into a fresh cs, and then copy the data back into the shared_block *)
+      let len, datav = Cstruct.fillv ~src:datav ~dst:cs_shared_block in
+      Io_page.string_blit (Cstruct.to_string cs_shared_block) 0 shared_block 0 (Cstruct.length cs_shared_block) ;
       (* [size] includes extra pages to follow later *)
       let size = match size with |None -> len |Some s -> s in
       Stats.tx nf.t.stats (Int64.of_int size);
