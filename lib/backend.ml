@@ -145,15 +145,44 @@ module Make(C: S.CONFIGURATION) = struct
       | None -> raise Netback_shutdown
       | Some x -> x in
     let module Recv = Assemble.Make(TX.Request) in
+    let pending_req : TX.Request.t option ref = ref None in
+    let pending_extras: TX.Extra.t list ref = ref [] in
     let rec loop after =
+      (* Collects all slots into the [slots] list *)
       let q = ref [] in
       Ring.Rpc.Back.ack_requests (from_netfront ())
         (fun slot ->
-          match TX.Request.read slot with
-          | Error msg -> Log.warn (fun f -> f "read_read TX has unparseable request: %s" msg)
-          | Ok req ->
-            q := req :: !q
-        );
+          match !pending_req with
+            | Some req ->
+              (* A pending request need to be fulfilled, and already some extra slots *)
+              begin match TX.Extra.read slot with
+              | Error msg ->
+                Log.warn (fun f -> f "read_extra_info TX has unparseable extra_info slot: %s" msg)
+              | Ok extra ->
+                if (extra.flags land 1 <> 0) then ( (* more extra data? *)
+                  pending_extras := extra::!pending_extras;
+                ) else (
+                  (* no more, add the request to the list *)
+                  pending_req := None;
+                  pending_extras := [];
+                  q := {req with extras=(List.rev !pending_extras)}::!q;
+                )
+              end
+            | None ->
+              (* The slot correspond to a new request *)
+              begin match TX.Request.read slot with
+              | Error msg -> Log.warn (fun f -> f "read_read TX has unparseable request: %s" msg)
+              | Ok req ->
+                if Flags.(mem extra_info) req.flags then (
+                    pending_req := Some req;
+                    pending_extras := [];
+                ) else (
+                  pending_req := None;
+                  pending_extras := [];
+                  q := {req with extras=(List.rev !pending_extras)}::!q;
+                )
+              end
+         );
       (* -- at this point the ring slots may be overwritten, but the grants are still valid *)
       List.rev !q
       |> Recv.group_frames
@@ -163,7 +192,7 @@ module Make(C: S.CONFIGURATION) = struct
             let data = Cstruct.create frame.Recv.total_size in
             let next = ref 0 in
             frame.Recv.fragments |> Lwt_list.iter_s (fun {Recv.size; msg} ->
-              let { TX.Request.flags = _; size = _; offset; gref; id } = msg in
+              let { TX.Request.flags; size=_; offset; gref; id; extras=_ } = msg in
               let gnt = { Import.
                 domid = t.frontend_id;
                 ref = Gntref.of_int32 gref
@@ -253,7 +282,7 @@ module Make(C: S.CONFIGURATION) = struct
                  Ring.Rpc.Back.(slot ring (next_res_id ring)) in
                let size = Ok len in
                let flags = Flags.empty in
-               let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size } in
+               let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size; extras=[] } in
                RX.Response.write resp slot;
                Stats.tx t.stats (Int64.of_int len);
                return ()
@@ -270,7 +299,7 @@ module Make(C: S.CONFIGURATION) = struct
                      Ring.Rpc.Back.(slot ring (next_res_id ring)) in
                    let size = Ok (if is_first then size else len) in
                    let flags = if rs = [] then Flags.empty else Flags.more_data in
-                   let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size } in
+                   let resp = { RX.Response.id = r.RX.Request.id; offset = 0; flags; size; extras=[] } in
                    RX.Response.write resp slot;
                    fill_reqs ~src ~is_first:false rs
                  | [] when Cstruct.lenv src = 0 -> ()

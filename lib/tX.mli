@@ -15,6 +15,20 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+
+module Extra : sig
+  type t = {
+    typ : int; (* uint8 *)
+    flags : int; (* uint8 *)
+    gso_size : int; (* uint16 *)
+    gso_type : int; (* uint8 *)
+    gso_pad : int; (* uint8 *)
+  }
+
+  val read: Cstruct.t -> (t, string) result
+
+end
+
 module Request : sig
   type error = { impossible : 'a. 'a }  (* No errors *)
 
@@ -24,6 +38,7 @@ module Request : sig
     flags: Flags.t;
     id: int;
     size: int;
+    extras: Extra.t list;
   }
 
   val write: t -> Cstruct.t -> unit
@@ -34,6 +49,7 @@ module Request : sig
 
   val size: t -> (int, error) result
 end
+
 
 module Response : sig
   type status =
