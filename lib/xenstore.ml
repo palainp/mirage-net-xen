@@ -83,7 +83,15 @@ module Make(Xs: Xs_client_lwt.S) = struct
   let backend_mac = Macaddr.of_string_exn "fe:ff:ff:ff:ff:ff"
   let read_backend_mac _ = return backend_mac
 
-  let read_mtu _id = return 1500 (* TODO *)
+  let read_mtu id =
+    frontend id
+    >>= fun frontend ->
+    Xs.make ()
+    >>= fun xsc ->
+    Xs.(immediate xsc (fun h -> read h (frontend / "mtu")))
+    >|= int_of_string
+    >>= fun mtu ->
+    return mtu
 
   let read_features side path =
     Xs.make ()
