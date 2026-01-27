@@ -192,7 +192,7 @@ module Make(C: S.CONFIGURATION) = struct
             let data = Cstruct.create frame.Recv.total_size in
             let next = ref 0 in
             frame.Recv.fragments |> Lwt_list.iter_s (fun {Recv.size; msg} ->
-              let { TX.Request.flags; size=_; offset; gref; id; extras=_ } = msg in
+              let { TX.Request.flags=_; size=_; offset; gref; id; extras=_ } = msg in
               let gnt = { Import.
                 domid = t.frontend_id;
                 ref = Gntref.of_int32 gref

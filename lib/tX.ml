@@ -25,15 +25,15 @@ module Extra = struct
   }
 
   let get_extra_type c = Cstruct.get_uint8 c 0
-  let set_extra_type c typ = Cstruct.set_uint8 c 0 typ
+  (* let set_extra_type c typ = Cstruct.set_uint8 c 0 typ *)
   let get_extra_flags c = Cstruct.get_uint8 c 1
-  let set_extra_flags c flags = Cstruct.set_uint8 c 1 flags
+  (* let set_extra_flags c flags = Cstruct.set_uint8 c 1 flags *)
   let get_extra_gso_size c = Cstruct.LE.get_uint16 c 2
-  let set_extra_gso_size c size = Cstruct.LE.set_uint16 c 2 size
+  (* let set_extra_gso_size c size = Cstruct.LE.set_uint16 c 2 size *)
   let get_extra_gso_type c = Cstruct.get_uint8 c 4
-  let set_extra_gso_type c typ = Cstruct.set_uint8 c 4 typ
+  (* let set_extra_gso_type c typ = Cstruct.set_uint8 c 4 typ *)
   let get_extra_gso_pad c = Cstruct.get_uint8 c 5
-  let set_extra_gso_pad c pad = Cstruct.set_uint8 c 5 pad
+  (* let set_extra_gso_pad c pad = Cstruct.set_uint8 c 5 pad *)
   let sizeof_extra = 8
 
   let read slot =
