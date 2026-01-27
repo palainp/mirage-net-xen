@@ -142,6 +142,8 @@ module Make(C: S.CONFIGURATION) = struct
 
   (** Set of active block devices *)
   let devices : (int, t) Hashtbl.t = Hashtbl.create 1
+  let pending_req : RX.Response.t option ref = ref None
+  let pending_extras: RX.Extra.t list ref = ref []
 
   let notify nf () =
     Xen_os.Eventchn.notify h nf.evtchn
@@ -199,10 +201,37 @@ module Make(C: S.CONFIGURATION) = struct
     let module Recv = Assemble.Make(RX.Response) in
     let q = ref [] in
     Ring.Rpc.Front.ack_responses nf.rx_fring (fun slot ->
-      match RX.Response.read slot with
-      | Error msg -> failwith msg
-      | Ok req -> q := req :: !q
-    );
+          match !pending_req with
+            | Some req ->
+              (* A pending request need to be fulfilled, and already some extra slots *)
+              begin match RX.Extra.read slot with
+              | Error msg ->
+                Log.warn (fun f -> f "read_extra_info RX has unparseable extra_info slot: %s" msg)
+              | Ok extra ->
+                if (extra.flags land 1 <> 0) then ( (* more extra data? *)
+                  pending_extras := extra::!pending_extras;
+                ) else (
+                  (* no more, add the request to the list *)
+                  pending_req := None;
+                  pending_extras := [];
+                  q := {req with extras=(List.rev !pending_extras)}::!q;
+                )
+              end
+            | None ->
+              (* The slot correspond to a new request *)
+              begin match RX.Response.read slot with
+              | Error msg -> Log.warn (fun f -> f "read_read RX has unparseable request: %s" msg)
+              | Ok req ->
+                if Flags.(mem extra_info) req.flags then (
+                    pending_req := Some req;
+                    pending_extras := [];
+                ) else (
+                  pending_req := None;
+                  pending_extras := [];
+                  q := {req with extras=(List.rev !pending_extras)}::!q;
+                )
+              end
+         );
     List.rev !q
     |> Recv.group_frames
     |> Lwt_list.iter_s (function
@@ -217,7 +246,7 @@ module Make(C: S.CONFIGURATION) = struct
           let data = Cstruct.create frame.Recv.total_size in
           let next = ref 0 in
           frame.Recv.fragments |> Lwt_list.iter_s (fun {Recv.size; msg} ->
-            let {RX.Response.id; size = _; flags = _; offset} = msg in
+            let {RX.Response.id; size = _; flags = _; offset; extras=_} = msg in
             pop_rx_page nf id >|= fun page ->
             let buf = Io_page.to_cstruct page in
             Cstruct.blit buf offset data !next size;
@@ -299,7 +328,8 @@ module Make(C: S.CONFIGURATION) = struct
         gref = Gntref.to_int32 gref;
         offset = shared_block.Cstruct.off;
         flags;
-        size
+        size;
+        extras=[];
       } in
       Lwt_ring.Front.write nf.t.tx_client
           (fun slot -> TX.Request.write request slot; id) >>= fun replied ->
@@ -327,7 +357,8 @@ module Make(C: S.CONFIGURATION) = struct
           gref = Gntref.to_int32 gref;
           offset = shared_block.Cstruct.off;
           flags = Flags.empty;
-          size = len
+          size = len;
+          extras=[];
         } in
         Lwt_ring.Front.write nf.t.tx_client
           (fun slot -> TX.Request.write request slot; id) >>= fun replied ->
