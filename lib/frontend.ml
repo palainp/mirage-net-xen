@@ -155,7 +155,11 @@ module Make(C: S.CONFIGURATION) = struct
         | n, [] -> failwith (Printf.sprintf "Frontend wants %d pages, this is too much, fail." n) (* We assume l is long enough *)
         | n, hd::tl -> split_list tl (n-1) (hd::acc)
     in
-    let fp = t.free_pages in
+    (* since we may have request longer than 1 page, we need to ensure t.free_pages is longer than n, allocates new pages if needed *)
+    let fp = match List.length t.free_pages with
+      | len when len >= n -> t.free_pages
+      | len -> List.append t.free_pages (Io_page.to_pages (Io_page.get (n-len)))
+    in
     let pages, new_free_pages = split_list fp n [] in
     t.free_pages <- new_free_pages ;
     pages
