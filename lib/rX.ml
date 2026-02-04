@@ -124,6 +124,7 @@ module Response = struct
 
   let flags t = t.flags
   let size t = t.size
+  let is_tx_protocol = false
 end
 
 let total_size = max Request.sizeof_req (max Response.sizeof_resp Extra.sizeof_extra)

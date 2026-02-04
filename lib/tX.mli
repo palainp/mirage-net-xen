@@ -48,6 +48,8 @@ module Request : sig
   val flags: t -> Flags.t
 
   val size: t -> (int, error) result
+
+  val is_tx_protocol : bool
 end
 
 module Response : sig

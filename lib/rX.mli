@@ -58,6 +58,8 @@ module Response : sig
   val flags: t -> Flags.t
 
   val size: t -> (int, error) result
+
+  val is_tx_protocol : bool
 end
 
 val total_size: int

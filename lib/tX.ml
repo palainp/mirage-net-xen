@@ -119,6 +119,8 @@ module Request = struct
     let extra_size = List.fold_left (fun acc extra -> acc + (extra.Extra.gso_size)) 0 t.extras in
     (* Logs.info (fun f -> f "taille du premier %d et taille extra %d" req_size extra_size);  *)
     Ok (req_size + extra_size)
+
+  let is_tx_protocol = true
 end
 
 module Response = struct

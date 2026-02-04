@@ -19,6 +19,7 @@ module type FRAME_MSG = sig
   type t
   val flags : t -> Flags.t
   val size : t -> (int, error) result
+  val is_tx_protocol : bool
 end
 
 module Make(F : FRAME_MSG) = struct
@@ -46,11 +47,17 @@ module Make(F : FRAME_MSG) = struct
   let make_frame ~first ~rest =
     match F.size first with
     | Error e -> Error (e, (first :: rest))
-    | Ok total_size ->
+    | Ok first_size ->
     match to_fragments rest with
     | Error e -> Error (e, (first :: rest))
     | Ok rest ->
-    let first_size = List.fold_left (fun acc f -> acc - f.size) total_size rest in
+    let rest_size = List.fold_left (fun acc f -> acc + f.size) 0 rest in
+    (* TX protocol: first fragment has the total size, first size is substraction from total and rest
+       RX protocol: first fragment has the first size, total size is addition from first and rest *)
+    let total_size, first_size = match F.is_tx_protocol with
+    | true -> first_size, first_size-rest_size
+    | false -> first_size+rest_size, first_size
+    in
     assert (first_size >= 0 && first_size <= Io_page.page_size);
     let first = { size = first_size; msg = first } in
     Ok {

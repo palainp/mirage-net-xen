@@ -21,6 +21,7 @@ module type FRAME_MSG = sig
   type t
   val flags : t -> Flags.t
   val size : t -> (int, error) result
+  val is_tx_protocol : bool
 end
 
 module Make(F : FRAME_MSG) : sig
