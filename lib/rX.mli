@@ -25,6 +25,7 @@ module Extra : sig
   }
 
   val read: Cstruct.t -> (t, string) result
+  val write: t -> Cstruct.t -> unit
 
 end
 
