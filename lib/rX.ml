@@ -15,6 +15,40 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+module Extra = struct
+  type t = {
+    typ : int;       (* uint8 *)
+    flags : int;     (* uint8 *)
+    gso_size : int;  (* uint16 *)
+    gso_type : int;  (* uint8 *)
+    gso_pad : int;   (* uint8 *)
+  }
+
+  let get_extra_type c = Cstruct.get_uint8 c 0
+  let get_extra_flags c = Cstruct.get_uint8 c 1
+  let get_extra_gso_size c = Cstruct.LE.get_uint16 c 2
+  let get_extra_gso_type c = Cstruct.get_uint8 c 4
+  let get_extra_gso_pad c = Cstruct.get_uint8 c 5
+  let sizeof_extra = 8
+
+  let read slot =
+    let typ = get_extra_type slot in
+    let flags = get_extra_flags slot in
+    (* Type values:
+       0 -> None
+       1 -> NETIF_EXTRA_TYPE_CSUM
+       2 -> NETIF_EXTRA_TYPE_GSO
+       3 -> NETIF_EXTRA_TYPE_TSO *)
+    if typ = 2 then ( (* NETIF_EXTRA_TYPE_GSO *)
+      let gso_size = get_extra_gso_size slot in
+      let gso_type = get_extra_gso_type slot in (* GSO type = 1 for TCPv4 *)
+      let gso_pad = get_extra_gso_pad slot in
+      Ok { typ; flags; gso_size; gso_type; gso_pad }
+    ) else (
+      Ok { typ; flags; gso_size=0; gso_type=0; gso_pad=0 }
+    )
+end
+
 module Request = struct
   type t = {
     id: int;
@@ -45,6 +79,7 @@ module Response = struct
     offset: int;
     flags: Flags.t;
     size: (int, error) result;
+    extras: Extra.t list;
   }
 
   let get_resp_id c = Cstruct.LE.get_uint16 c 0
@@ -72,7 +107,7 @@ module Response = struct
       match get_resp_status slot with
       | status when status > 0 -> Ok status
       | status -> Error status in
-    Ok { id; offset; flags; size }
+    Ok { id; offset; flags; size; extras = [] }
 
   let write t slot =
     set_resp_id slot t.id;
@@ -90,5 +125,5 @@ module Response = struct
   let size t = t.size
 end
 
-let total_size = max Request.sizeof_req Response.sizeof_resp
+let total_size = max Request.sizeof_req (max Response.sizeof_resp Extra.sizeof_extra)
 let () = assert(total_size = 8)

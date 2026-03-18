@@ -90,7 +90,7 @@ module RX_Message : MESSAGE with type t = RX.Response.t
   let size msg = msg.RX.Response.size
   let gref _msg = 0l
   let make ~id ~offset ~flags ~size ~gref:_ =
-    { RX.Response.id; offset; flags; size = Ok size }
+    { RX.Response.id; offset; flags; size = Ok size ; extras = [] }
 end
 
 module TX_Message : MESSAGE with type t = TX.Request.t 
@@ -106,7 +106,7 @@ module TX_Message : MESSAGE with type t = TX.Request.t
   let size msg = TX.Request.size msg
   let gref msg = msg.TX.Request.gref
   let make ~id ~offset ~flags ~size ~gref =
-    { TX.Request.gref; offset; flags; id; size }
+    { TX.Request.gref; offset; flags; id; size ; extras = [] }
 end
 
 module Make_Reader(Msg : MESSAGE)(Size : SIZE_STRATEGY) = struct

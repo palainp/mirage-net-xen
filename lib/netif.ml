@@ -199,7 +199,7 @@ module Unified_TX_Ops = struct
                 (match t.tx_ring with
                  | Front_ring (_, client) ->
                      let request = { TX.Request.id; gref = Gntref.to_int32 gref;
-                                     offset = shared_block.Cstruct.off; flags = Flags.empty; size = len } in
+                                     offset = shared_block.Cstruct.off; flags = Flags.empty; size = len; extras = [] } in
                      Lwt_ring.Front.write client (fun slot ->
                        TX.Request.write request slot; id
                      ) >>= fun replied ->
@@ -243,7 +243,8 @@ module Unified_TX_Ops = struct
                    let resp = { RX.Response.id = req.RX.Request.id;
                                 offset = 0;
                                 flags = Flags.empty;
-                                size = Ok to_copy } in
+                                size = Ok to_copy;
+                                extras = [] } in
                    RX.Response.write resp slot
                | _ -> assert false);
               Import.Local_mapping.unmap_exn mapping;
