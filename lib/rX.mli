@@ -15,20 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-module Extra : sig
-  type t = {
-    typ : int;       (* uint8 *)
-    flags : int;     (* uint8 *)
-    gso_size : int;  (* uint16 *)
-    gso_type : int;  (* uint8 *)
-    gso_pad : int;   (* uint8 *)
-  }
-
-  val read: Cstruct.t -> (t, string) result
-  val write: t -> Cstruct.t -> unit
-
-end
-
 module Request : sig
   type t = {
     id: int;
@@ -48,7 +34,7 @@ module Response : sig
     offset: int;
     flags: Flags.t;
     size: (int, error) result;
-    extras: Extra.t list;
+    extras : Extra.t list;
   }
 
   val read: Cstruct.t -> (t, string) result

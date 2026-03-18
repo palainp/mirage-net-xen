@@ -88,6 +88,7 @@ type transport = {
   
   evtchn: Xen_os.Eventchn.t;
   stats: Mirage_net.stats;
+  gso_tcpv4: bool; (* This stands for the support of GSO by the other end*)
 }
 
 type grant_ops = {
@@ -274,19 +275,15 @@ module Unified_RX_Ops = struct
   let read_packets nf =
     match nf.t.tx_pool with
     | Some _ -> (* Frontend *)
-      let acked = ref 0 in
-      let packets = Assemble.RX_IO.read_packets ~ack_fn:(fun f ->
+      let packets = Assemble.RX_IO.read_packets ~with_extras:nf.t.gso_tcpv4 ~ack_fn:(fun f ->
         Ring_ops.ack nf.t.rx_ring (fun slot ->
-          incr acked;
           f slot
         )
       ) in
       packets
     | None -> (* Backend *)
-      let acked = ref 0 in
-      let packets = Assemble.TX_IO.read_packets ~ack_fn:(fun f ->
+      let packets = Assemble.TX_IO.read_packets ~with_extras:nf.t.gso_tcpv4 ~ack_fn:(fun f ->
         Ring_ops.ack nf.t.tx_ring (fun slot ->
-          incr acked;
           f slot
         )
       ) in
@@ -409,6 +406,7 @@ module Make(C: S.CONFIGURATION) = struct
       tx_ring; tx_gnt; tx_mutex = Lwt_mutex.create (); tx_pool = Some tx_pool;
       rx_ring; rx_gnt; rx_grants = None; rx_map = Some rx_map; rx_id = 0; free_pages;
       evtchn; stats;
+      gso_tcpv4 = false; (* TODO: read the other end feature *)
     } in
     Log.info (fun f -> f "[Frontend] Transport created successfully");
     return transport
@@ -434,6 +432,7 @@ module Make(C: S.CONFIGURATION) = struct
       tx_ring; tx_gnt = Gntref.of_int32 tx_ring_ref; tx_mutex = Lwt_mutex.create (); tx_pool = None;
       rx_ring; rx_gnt = Gntref.of_int32 rx_ring_ref; rx_grants = Some rx_grants; rx_map = None; rx_id = 0; free_pages = [];
       evtchn = channel; stats;
+      gso_tcpv4 = false; (* TODO: read the other end feature *)
     } in
     Log.info (fun f -> f "[Backend] Transport created successfully");
     return transport

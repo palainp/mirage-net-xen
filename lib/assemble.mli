@@ -50,10 +50,12 @@ module type MESSAGE = sig
   val size : t -> (int, error) result
   val gref : t -> int32
   val make : id:int -> offset:int -> flags:Flags.t -> size:int -> gref:int32 -> t
+
+  val set_extras : t -> Extra.t list -> t
 end
 
 module type IO = sig
-  val read_packets : ack_fn:((Cstruct.t -> unit) -> unit) -> packet list
+  val read_packets : with_extras:bool -> ack_fn:((Cstruct.t -> unit) -> unit) -> packet list
   val write_packet : get_slot:(unit -> Cstruct.t) -> packet:packet -> unit
 end
 

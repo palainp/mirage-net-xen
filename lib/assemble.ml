@@ -75,9 +75,11 @@ module type MESSAGE = sig
   val size : t -> (int, error) result
   val gref : t -> int32
   val make : id:int -> offset:int -> flags:Flags.t -> size:int -> gref:int32 -> t
+
+  val set_extras : t -> Extra.t list -> t
 end
 
-module RX_Message : MESSAGE with type t = RX.Response.t 
+module RX_Message : MESSAGE with type t = RX.Response.t
                              and type error = int = struct
   type t = RX.Response.t
   type error = int
@@ -90,10 +92,12 @@ module RX_Message : MESSAGE with type t = RX.Response.t
   let size msg = msg.RX.Response.size
   let gref _msg = 0l
   let make ~id ~offset ~flags ~size ~gref:_ =
-    { RX.Response.id; offset; flags; size = Ok size ; extras = [] }
+    { RX.Response.id; offset; flags; size = Ok size; extras = [] }
+
+  let set_extras msg extras = {msg with RX.Response.extras = extras}
 end
 
-module TX_Message : MESSAGE with type t = TX.Request.t 
+module TX_Message : MESSAGE with type t = TX.Request.t
                              and type error = TX.Request.error = struct
   type t = TX.Request.t
   type error = TX.Request.error
@@ -106,18 +110,57 @@ module TX_Message : MESSAGE with type t = TX.Request.t
   let size msg = TX.Request.size msg
   let gref msg = msg.TX.Request.gref
   let make ~id ~offset ~flags ~size ~gref =
-    { TX.Request.gref; offset; flags; id; size ; extras = [] }
+    { TX.Request.gref; offset; flags; id; size; extras = [] }
+
+  let set_extras msg extras = {msg with TX.Request.extras = extras}
 end
 
 module Make_Reader(Msg : MESSAGE)(Size : SIZE_STRATEGY) = struct
   
-  let collect_messages ack_fn =
+  let collect_messages ?(with_extras=false) ack_fn =
     let messages = ref [] in
-    
+    let pending_msg = ref None in
+    let pending_extras = ref [] in
+
     ack_fn (fun slot ->
-      match Msg.read slot with
-      | Error e -> Log.warn (fun f -> f "[%s] Bad msg: %s" Size.name e)
-      | Ok msg -> messages := msg :: !messages
+      if with_extras then (
+        (* Read GSO's extra_info *)
+        match !pending_msg with
+        | Some base_msg ->
+            (* Continue a previous message with extra_infos *)
+            begin match Extra.read slot with
+            | Error e ->
+                Log.warn (fun f -> f "[%s] Drop bad extra_info: %s" Size.name e);
+                messages := base_msg :: !messages;
+                pending_msg := None;
+                pending_extras := []
+            | Ok extra ->
+                pending_extras := extra :: !pending_extras;
+                (* Bit 0 is flags: 0 = last extra, 1 = more extras *)
+                if extra.Extra.flags land 1 = 0 then (
+                  (* Last one, create the final message, empty the accs *)
+                  messages := Msg.set_extras base_msg (List.rev !pending_extras) :: !messages;
+                  pending_msg := None;
+                  pending_extras := []
+                ) else (
+                  (* Not the last one accumulate pending_extras *)
+                  pending_extras := extra :: !pending_extras
+                )
+            end
+        | None ->
+            (* Start a new message slot *)
+            match Msg.read slot with
+            | Error e -> Log.warn (fun f -> f "[%s] Bad msg: %s" Size.name e)
+            | Ok msg ->
+                if Flags.(mem extra_info) (Msg.flags msg) then
+                  pending_msg := Some msg
+                else
+                  messages := msg :: !messages
+      ) else (
+        match Msg.read slot with
+        | Error e -> Log.warn (fun f -> f "[%s] Bad msg: %s" Size.name e)
+        | Ok msg -> messages := msg :: !messages
+      )
     );
     let result = List.rev !messages in
     Log.debug (fun f -> f "[%s.Reader] collect_messages: collected %d messages" 
@@ -163,8 +206,8 @@ module Make_Reader(Msg : MESSAGE)(Size : SIZE_STRATEGY) = struct
     
     { total_size; fragments = first_fragment :: rest_fragments }
   
-  let read_packets ack_fn =
-    let messages = collect_messages ack_fn in
+  let read_packets ?with_extras ack_fn =
+    let messages = collect_messages ?with_extras ack_fn in
     let packets = group_into_packets messages in
     Log.debug (fun f -> f "[%s.Reader] read_packets: %d messages -> %d packets" 
       Size.name (List.length messages) (List.length packets));
@@ -209,16 +252,16 @@ module TX_Reader = Make_Reader(TX_Message)(TX_Size_Strategy)
 module TX_Writer = Make_Writer(TX_Message)(TX_Size_Strategy)
 
 module type IO = sig
-  val read_packets : ack_fn:((Cstruct.t -> unit) -> unit) -> packet list
+  val read_packets : with_extras:bool -> ack_fn:((Cstruct.t -> unit) -> unit) -> packet list
   val write_packet : get_slot:(unit -> Cstruct.t) -> packet:packet -> unit
 end
 
 module RX_IO : IO = struct
-  let read_packets ~ack_fn = RX_Reader.read_packets ack_fn
+  let read_packets ~with_extras ~ack_fn = RX_Reader.read_packets ~with_extras ack_fn
   let write_packet ~get_slot ~packet = RX_Writer.write_packet ~get_slot ~packet
 end
 
 module TX_IO : IO = struct
-  let read_packets ~ack_fn = TX_Reader.read_packets ack_fn
+  let read_packets ~with_extras ~ack_fn = TX_Reader.read_packets ~with_extras ack_fn
   let write_packet ~get_slot ~packet = TX_Writer.write_packet ~get_slot ~packet
 end
