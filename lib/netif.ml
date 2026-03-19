@@ -180,15 +180,29 @@ let backend_get_n_grefs t n =
   loop Xen_os.Activations.program_start
 
 module Unified_TX_Ops = struct
+  let write_gso_extra ring gso_size gso_type =
+    let extra = { Extra.typ = 2; flags = 0; gso_size; gso_type; gso_pad = 0 } in
+    match ring with
+    | Front_ring (fring, _) ->
+        let slot_id = Ring.Rpc.Front.next_req_id fring in
+        let slot = Ring.Rpc.Front.slot fring slot_id in
+        Extra.write extra slot
+    | Back_ring bring ->
+        let slot_id = Ring.Rpc.Back.next_res_id bring in
+        let slot = Ring.Rpc.Back.slot bring slot_id in
+        Extra.write extra slot
+
   let fragment_data t data =
     let size = Cstruct.length data in
-    
+    let use_gso = t.gso_tcpv4 && size > t.mtu in
+
     match t.tx_pool with
     | Some tx_pool -> (* Frontend *)
         let numneeded = Shared_page_pool.blocks_needed size in
+        let numneeded = if use_gso then 1+numneeded else numneeded in
         Ring_ops.wait_for_free t.tx_ring numneeded >>= fun () ->
 
-        let rec copy_to_pages datav offset acc_frags = function
+        let rec copy_to_pages datav offset is_first acc_frags = function
           | 0 -> return (List.rev acc_frags)
           | n ->
               Shared_page_pool.use tx_pool (fun ~id gref shared_block ->
@@ -199,25 +213,40 @@ module Unified_TX_Ops = struct
                 } in
                 (match t.tx_ring with
                  | Front_ring (_, client) ->
+                     let has_more = n>1 in
+                     let flags =
+                       match (is_first, use_gso, has_more) with
+                       | (true, true, true) -> Flags.(++) Flags.extra_info Flags.more_data
+                       | (true, true, false) -> Flags.extra_info
+                       | (_, false, true) -> Flags.more_data
+                       | _ -> Flags.empty
+                     in
                      let request = { TX.Request.id; gref = Gntref.to_int32 gref;
-                                     offset = shared_block.Cstruct.off; flags = Flags.empty; size = len; extras = [] } in
+                                     offset = shared_block.Cstruct.off; flags; size = len; extras = [] } in
                      Lwt_ring.Front.write client (fun slot ->
                        TX.Request.write request slot; id
                      ) >>= fun replied ->
+                     (* One the first fragment is written, write the extra_info slot *)
+                     (if is_first && use_gso then
+                       let gso_size = t.mtu - 40 (* TODO, should we do something else? like getting from the caller? *) in
+                       let gso_type = 1 in (* TCPv4: we don't support IPv6 right now *)
+                       write_gso_extra t.tx_ring gso_size gso_type;
+                     Log.debug (fun f -> f "[Frontend-TX] Wrote GSO extra: size=%d" gso_size)
+                     );
                      let release = replied >|= fun _reply -> () in
                      return ((datav', frag), release)
                  | _ ->
                      return ((datav', frag), Lwt.return_unit))
               ) >>= fun ((datav', frag), release) ->
-              copy_to_pages datav' (offset + frag.size) ((frag, release) :: acc_frags) (n - 1)
+              copy_to_pages datav' (offset + frag.size) false ((frag, release) :: acc_frags) (n - 1)
         in
-        copy_to_pages [data] 0 [] numneeded
+        copy_to_pages [data] 0 true [] numneeded
     
     | None -> (* Backend *)
         let pages_needed = max 1 @@ Io_page.round_to_page_size size / Io_page.page_size in
         backend_get_n_grefs t pages_needed >>= fun reqs ->
 
-        let rec map_and_copy src offset acc_frags = function
+        let rec map_and_copy src offset is_first acc_frags = function
           | [] -> return (List.rev acc_frags)
           | req :: rest ->
               let gnt = {Import.domid = t.peer_domid; ref = Gntref.of_int32 req.RX.Request.gref} in
@@ -237,21 +266,35 @@ module Unified_TX_Ops = struct
                 size = to_copy;
                 gref = req.RX.Request.gref;
               } in
+              let has_more = (rest <> []) in
+              let flags = 
+                match (is_first, use_gso, has_more) with
+                | (true, true, true) -> Flags.(++) Flags.extra_info Flags.more_data
+                | (true, true, false) -> Flags.extra_info
+                | (_, false, true) -> Flags.more_data
+                | _ -> Flags.empty
+              in
               (match t.rx_ring with
                | Back_ring bring ->
                    let slot_id = Ring.Rpc.Back.next_res_id bring in
                    let slot = Ring.Rpc.Back.slot bring slot_id in
                    let resp = { RX.Response.id = req.RX.Request.id;
                                 offset = 0;
-                                flags = Flags.empty;
+                                flags;
                                 size = Ok to_copy;
                                 extras = [] } in
-                   RX.Response.write resp slot
+                   RX.Response.write resp slot;
+                   (if is_first && use_gso then (
+                     let gso_size = t.mtu - 40 (* TODO, should we do something else? like getting from the caller? *) in
+                     let gso_type = 1 in (* TCPv4: we don't support IPv6 right now *)
+                     write_gso_extra t.rx_ring gso_size gso_type;
+                     Log.debug (fun f -> f "[Backend-TX] Wrote GSO extra: size=%d" gso_size)
+                   ))
                | _ -> assert false);
               Import.Local_mapping.unmap_exn mapping;
-              map_and_copy src (offset + to_copy) ((frag, Lwt.return_unit) :: acc_frags) rest
+              map_and_copy src (offset + to_copy) false ((frag, Lwt.return_unit) :: acc_frags) rest
         in
-        map_and_copy data 0 [] reqs
+        map_and_copy data 0 true [] reqs
 
   let notify_if_needed t =
     match t.tx_pool with
