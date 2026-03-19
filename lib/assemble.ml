@@ -159,9 +159,19 @@ module Make_Reader(Msg : MESSAGE)(Size : SIZE_STRATEGY) = struct
         | Ok msg -> messages := msg :: !messages
       )
     );
+    if with_extras then (
+      match !pending_msg with
+      | Some base_msg ->
+          Log.warn (fun f -> f "Orphan message recovered");
+          messages := Msg.set_extras base_msg (List.rev !pending_extras) :: !messages
+      | None -> ()
+    );
     let result = List.rev !messages in
+    Log.info (fun f -> f "[TX] Collected %d messages with IDs: %s" 
+      (List.length result)
+      (String.concat ", " (List.map (fun m -> string_of_int (Msg.id m)) result)));
     Log.debug (fun f -> f "[%s.Reader] collect_messages: collected %d messages" 
-      Size.name (List.length result));
+    Size.name (List.length result));
     result
   
   let rec group_into_packets = function
