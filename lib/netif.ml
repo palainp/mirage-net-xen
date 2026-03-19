@@ -382,7 +382,7 @@ module Make(C: S.CONFIGURATION) = struct
   (** Set of active block devices *)
   let devices : (int, t) Hashtbl.t = Hashtbl.create 1
 
-  let create_frontend ~vif_id ~backend_id ~mac ~mtu =
+  let create_frontend ~vif_id ~backend_id ~mac ~mtu ~gso_tcpv4 =
     Log.info (fun f -> f "[Frontend] Creating: id=%d domid=%d" vif_id backend_id);
     frontend_create_ring ~domid:backend_id ~idx_size:TX.total_size 
       (Printf.sprintf "Netif.TX.%d" vif_id) 
@@ -406,12 +406,13 @@ module Make(C: S.CONFIGURATION) = struct
       tx_ring; tx_gnt; tx_mutex = Lwt_mutex.create (); tx_pool = Some tx_pool;
       rx_ring; rx_gnt; rx_grants = None; rx_map = Some rx_map; rx_id = 0; free_pages;
       evtchn; stats;
-      gso_tcpv4 = false; (* TODO: read the other end feature *)
+      gso_tcpv4 = gso_tcpv4 && Features.supported.gso_tcpv4;
     } in
-    Log.info (fun f -> f "[Frontend] Transport created successfully");
+    Log.info (fun f -> f "[Frontend] Transport created successfully: Local Frontend GSO support: %b, Distant Backend GSO support: %b, GSO enabled: %b" 
+      Features.supported.gso_tcpv4 gso_tcpv4 transport.gso_tcpv4); (* As we have gso_tcpv4, the 'and' result is only the other side one *)
     return transport
   
-  let create_backend ~domid ~device_id ~frontend_mac ~mac ~mtu ~tx_ring_ref ~rx_ring_ref ~event_channel =
+  let create_backend ~domid ~device_id ~frontend_mac ~mac ~mtu ~tx_ring_ref ~rx_ring_ref ~event_channel ~gso_tcpv4 =
     Log.info (fun f -> f "[Backend] Creating: domid=%d device_id=%d" domid device_id);
     let frontend_id = domid in
     backend_import_ring ~domid:frontend_id ~gntref:(Gntref.of_int32 tx_ring_ref) 
@@ -432,9 +433,10 @@ module Make(C: S.CONFIGURATION) = struct
       tx_ring; tx_gnt = Gntref.of_int32 tx_ring_ref; tx_mutex = Lwt_mutex.create (); tx_pool = None;
       rx_ring; rx_gnt = Gntref.of_int32 rx_ring_ref; rx_grants = Some rx_grants; rx_map = None; rx_id = 0; free_pages = [];
       evtchn = channel; stats;
-      gso_tcpv4 = false; (* TODO: read the other end feature *)
+      gso_tcpv4 = gso_tcpv4 && Features.supported.gso_tcpv4;
     } in
-    Log.info (fun f -> f "[Backend] Transport created successfully");
+    Log.info (fun f -> f "[Backend] Transport created successfully: Distant Frontend GSO support: %b, Local Backend GSO support: %b, GSO enabled: %b" 
+      gso_tcpv4 Features.supported.gso_tcpv4 transport.gso_tcpv4); (* As we have gso_tcpv4, the 'and' result is only the other side one *)
     return transport
   
   let plug_frontend vif_id =
@@ -443,7 +445,7 @@ module Make(C: S.CONFIGURATION) = struct
     let backend_id = backend_conf.S.backend_id in
     C.read_frontend_mac id >>= fun mac ->
     C.read_mtu id >>= fun mtu ->
-    create_frontend ~vif_id ~backend_id ~mac ~mtu >>= fun transport ->
+    create_frontend ~vif_id ~backend_id ~mac ~mtu ~gso_tcpv4:backend_conf.S.features_available.gso_tcpv4 >>= fun transport ->
     let front_conf = { S.
       tx_ring_ref = Gntref.to_int32 transport.tx_gnt;
       rx_ring_ref = Gntref.to_int32 transport.rx_gnt;
@@ -523,6 +525,7 @@ module Make(C: S.CONFIGURATION) = struct
       ~tx_ring_ref:f.S.tx_ring_ref 
       ~rx_ring_ref:f.S.rx_ring_ref 
       ~event_channel:f.S.event_channel
+      ~gso_tcpv4:f.S.feature_requests.gso_tcpv4
     >>= fun transport ->
     C.connect id >>= fun () ->
     Log.info (fun f -> f "[Backend] Connected to frontend");
