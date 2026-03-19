@@ -142,9 +142,6 @@ module Make_Reader(Msg : MESSAGE)(Size : SIZE_STRATEGY) = struct
                   messages := Msg.set_extras base_msg (List.rev !pending_extras) :: !messages;
                   pending_msg := None;
                   pending_extras := []
-                ) else (
-                  (* Not the last one accumulate pending_extras *)
-                  pending_extras := extra :: !pending_extras
                 )
             end
         | None ->
