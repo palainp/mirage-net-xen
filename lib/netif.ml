@@ -217,7 +217,7 @@ module Unified_TX_Ops = struct
           | n ->
               Shared_page_pool.use tx_pool (fun ~id gref shared_block ->
                 let len, datav' = Cstruct.fillv ~src:datav ~dst:shared_block in
-                Log.info (fun f -> f "[Frontend-TX] Fragment %d/%d: offset=%d len=%d is_first=%b" (numneeded - n + 1) numneeded offset len is_first)
+                Log.info (fun f -> f "[Frontend-TX] Fragment %d/%d: offset=%d len=%d is_first=%b" (numneeded - n + 1) numneeded offset len is_first);
                 let frag = Assemble.{
                   id; offset = shared_block.Cstruct.off; size = len;
                   gref = Gntref.to_int32 gref;
