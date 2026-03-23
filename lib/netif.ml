@@ -204,7 +204,7 @@ module Unified_TX_Ops = struct
 
   let fragment_data t data =
     let size = Cstruct.length data in
-    let use_gso = t.gso_tcpv4 && size > t.mtu in
+    let use_gso = t.gso_tcpv4 && size > 2*t.mtu in (* test to GSO only very big packets *)
 
     match t.tx_pool with
     | Some tx_pool -> (* Frontend *)
@@ -224,6 +224,7 @@ module Unified_TX_Ops = struct
                 (match t.tx_ring with
                  | Front_ring (_, client) ->
                      let has_more = n>1 in
+                     let request_size = if is_first && use_gso then size else len in
                      let flags =
                        match (is_first, use_gso, has_more) with
                        | (true, true, true) -> Flags.(++) Flags.extra_info Flags.more_data
@@ -232,7 +233,7 @@ module Unified_TX_Ops = struct
                        | _ -> Flags.empty
                      in
                      let request = { TX.Request.id; gref = Gntref.to_int32 gref;
-                                     offset = shared_block.Cstruct.off; flags; size = len; extras = [] } in
+                                     offset = shared_block.Cstruct.off; flags; size = request_size; extras = [] } in
                      Lwt_ring.Front.write client (fun slot ->
                        TX.Request.write request slot; id
                      ) >>= fun replied ->
@@ -241,7 +242,7 @@ module Unified_TX_Ops = struct
                        let gso_size = t.mtu - 40 (* TODO, should we do something else? like getting from the caller? *) in
                        let gso_type = 1 in (* TCPv4: we don't support IPv6 right now *)
                        write_gso_extra t.tx_ring t.evtchn gso_size gso_type;
-                     Log.debug (fun f -> f "[Frontend-TX] Wrote GSO extra: size=%d" gso_size)
+                     Log.debug (fun f -> f "[Frontend-TX] Wrote GSO extra: size=%d total_size=%d" gso_size size)
                      );
                      let release = replied >|= fun _reply -> () in
                      return ((datav', frag), release)
