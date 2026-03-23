@@ -180,14 +180,24 @@ let backend_get_n_grefs t n =
   loop Xen_os.Activations.program_start
 
 module Unified_TX_Ops = struct
-  let write_gso_extra ring gso_size gso_type =
+  (* Write GSO extra WITHOUT creating a Lwt_ring wakener (no response expected) *)
+  let write_gso_extra ring evtchn gso_size gso_type =
     let extra = { Extra.typ = 2; flags = 0; gso_size; gso_type; gso_pad = 0 } in
     match ring with
-    | Front_ring (fring, _) ->
+    | Front_ring (fring, client) ->
+        (* Get the next slot ID manually *)
         let slot_id = Ring.Rpc.Front.next_req_id fring in
         let slot = Ring.Rpc.Front.slot fring slot_id in
-        Extra.write extra slot
+        Extra.write extra slot;
+        (* Push the ring WITHOUT creating a wakener *)
+        (* The extra slot will never receive a TX.Response, so we don't wait for one *)
+        Lwt_ring.Front.push client (fun () ->
+          if Ring.Rpc.Front.push_requests_and_check_notify fring then
+            Xen_os.Eventchn.notify h evtchn
+        );
+        Log.debug (fun f -> f "[Frontend-TX] Wrote GSO extra: gso_size=%d (no wakener)" gso_size)
     | Back_ring bring ->
+        (* Backend side - write extra in RX ring response *)
         let slot_id = Ring.Rpc.Back.next_res_id bring in
         let slot = Ring.Rpc.Back.slot bring slot_id in
         Extra.write extra slot
@@ -230,7 +240,7 @@ module Unified_TX_Ops = struct
                      (if is_first && use_gso then
                        let gso_size = t.mtu - 40 (* TODO, should we do something else? like getting from the caller? *) in
                        let gso_type = 1 in (* TCPv4: we don't support IPv6 right now *)
-                       write_gso_extra t.tx_ring gso_size gso_type;
+                       write_gso_extra t.tx_ring t.evtchn gso_size gso_type;
                      Log.debug (fun f -> f "[Frontend-TX] Wrote GSO extra: size=%d" gso_size)
                      );
                      let release = replied >|= fun _reply -> () in
@@ -287,7 +297,7 @@ module Unified_TX_Ops = struct
                    (if is_first && use_gso then (
                      let gso_size = t.mtu - 40 (* TODO, should we do something else? like getting from the caller? *) in
                      let gso_type = 1 in (* TCPv4: we don't support IPv6 right now *)
-                     write_gso_extra t.rx_ring gso_size gso_type;
+                     write_gso_extra t.rx_ring t.evtchn gso_size gso_type;
                      Log.debug (fun f -> f "[Backend-TX] Wrote GSO extra: size=%d" gso_size)
                    ))
                | _ -> assert false);
