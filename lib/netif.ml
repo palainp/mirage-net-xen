@@ -204,6 +204,9 @@ module Unified_TX_Ops = struct
 
   let fragment_data t data =
     let size = Cstruct.length data in
+    let direction = match t.tx_pool with Some _ -> "Frontend" | None -> "Backend" in
+    Log.info (fun f -> f "[%s] fragment_data: size=%d mtu=%d gso_tcpv4=%b" 
+      direction size t.mtu t.gso_tcpv4);
     let use_gso = t.gso_tcpv4 && size > 2*t.mtu in (* test to GSO only very big packets *)
 
     match t.tx_pool with
