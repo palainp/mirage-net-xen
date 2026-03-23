@@ -217,6 +217,7 @@ module Unified_TX_Ops = struct
           | n ->
               Shared_page_pool.use tx_pool (fun ~id gref shared_block ->
                 let len, datav' = Cstruct.fillv ~src:datav ~dst:shared_block in
+                Log.info (fun f -> f "[Frontend-TX] Fragment %d/%d: offset=%d len=%d is_first=%b" (numneeded - n + 1) numneeded offset len is_first)
                 let frag = Assemble.{
                   id; offset = shared_block.Cstruct.off; size = len;
                   gref = Gntref.to_int32 gref;
@@ -242,7 +243,7 @@ module Unified_TX_Ops = struct
                        let gso_size = t.mtu - 40 (* TODO, should we do something else? like getting from the caller? *) in
                        let gso_type = 1 in (* TCPv4: we don't support IPv6 right now *)
                        write_gso_extra t.tx_ring t.evtchn gso_size gso_type;
-                     Log.debug (fun f -> f "[Frontend-TX] Wrote GSO extra: size=%d total_size=%d" gso_size size)
+                     Log.info (fun f -> f "[Frontend-TX] Wrote GSO extra: size=%d total_size=%d" gso_size size)
                      );
                      let release = replied >|= fun _reply -> () in
                      return ((datav', frag), release)
