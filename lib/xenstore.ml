@@ -45,6 +45,114 @@ module Make(Xs: Xs_client_lwt.S) = struct
     with _ ->
       fail (Failure (Printf.sprintf "Expected a 32-bit integer: %s" x))
 
+  (* To my understanding from the linux netback code, the state machine is:
+     [Unknown] -(a)-> [InitWait] --(b)--> [Connected]
+                         ^    |                  |
+                    (f)  |    \ (d)              | (c)
+                         |     \                 |
+                      [Closed]  \--> [Closing] <-/
+                         ^                 |
+                         \-------(e)-------/
+
+    with a) publish backend features
+         b) read frontend features, map rings, bind the channel, etc.
+         c) free mappings, unbind channel
+         d) do nothing apart publishing the state: this is special for windows PV,
+            it uses two netif (one for the guest and the other for the -dm and give
+            up for the -dm's one)
+         e) guest is leaving, do nothing apart publishing the state
+         f) features are already published, do nothing apart publishing the state *)
+
+  exception Client_gone
+
+  (* What is the target state when we see the frontend's one *)
+  let target =
+    function
+    | Xen_os.Device_state.Initialising -> Some Xen_os.Device_state.InitWait
+    | Xen_os.Device_state.Connected -> Some Xen_os.Device_state.Connected
+    | Xen_os.Device_state.Closing -> Some Xen_os.Device_state.Closing
+    | Xen_os.Device_state.Closed
+    | Xen_os.Device_state.Unknown -> Some Xen_os.Device_state.Closed
+    | Xen_os.Device_state.InitWait
+    | Xen_os.Device_state.Initialised
+    | Xen_os.Device_state.Reconfiguring
+    | Xen_os.Device_state.Reconfigured -> None (* All these does not appear to be written by frontend... *)
+
+  (* What state we should write when we are in [current], and we want to move to [target] (multiple
+     iterations and state transition might be required) *)
+  let next_state current target =
+    match current, target with
+    | Xen_os.Device_state.InitWait, Xen_os.Device_state.Connected -> Xen_os.Device_state.Connected
+    | Xen_os.Device_state.InitWait, Xen_os.Device_state.Closing
+    | Xen_os.Device_state.InitWait, Xen_os.Device_state.Closed -> Xen_os.Device_state.Closing
+
+    | Xen_os.Device_state.Connected, Xen_os.Device_state.InitWait
+    | Xen_os.Device_state.Connected, Xen_os.Device_state.Closing
+    | Xen_os.Device_state.Connected, Xen_os.Device_state.Closed -> Xen_os.Device_state.Closing
+
+    | Xen_os.Device_state.Closing, Xen_os.Device_state.InitWait
+    | Xen_os.Device_state.Closing, Xen_os.Device_state.Connected
+    | Xen_os.Device_state.Closing, Xen_os.Device_state.Closed -> Xen_os.Device_state.Closed
+
+    | Xen_os.Device_state.Closed, Xen_os.Device_state.InitWait
+    | Xen_os.Device_state.Closed, Xen_os.Device_state.Connected -> Xen_os.Device_state.InitWait
+
+    | Xen_os.Device_state.Closed, Xen_os.Device_state.Closing -> Xen_os.Device_state.Closing
+    | _, _ -> invalid_arg "next_state"
+
+  (* State at [path]; a missing node reads as Unknown *)
+  let read_state h path =
+    Lwt.catch
+      (fun () -> Xs.read h (path / "state") >|= Xen_os.Device_state.of_string)
+      (function
+        | Xs_protocol.Enoent _ -> return Xen_os.Device_state.Unknown
+        | ex -> fail ex)
+
+  (* A watcher that scan the frontend state change *)
+  let frontend_change xsc path seen =
+    Xs.wait xsc (fun h ->
+      read_state h path >>= fun s ->
+      if Some s = seen then fail Xs_protocol.Eagain else return s)
+
+  (* Tell if the frontend is gone from the backend POV *)
+  let removed xsc backend state =
+    match state with
+    | Xen_os.Device_state.Unknown -> return true
+    | Xen_os.Device_state.Closed ->
+      Lwt.catch
+        (fun () -> Xs.(immediate xsc (fun h -> read h (backend / "online"))) >|= (<>) "1")
+        (fun _ -> return true)
+    | _ -> return false
+
+  (* Track the frontend state and move accordingly following the state machine. The function walks
+     through the state transitions until something needs to be done (at b during connexion and e when we call
+     disconnect_backend) where it returns (). So we only need to call follow and when it returns we need to do something *)
+  let follow xsc ~frontend ~backend ~until current =
+    let write state =
+      Xs.(immediate xsc (fun h -> write h (backend / "state") (Xen_os.Device_state.to_string state))) in
+    let rec walk current t =
+      if (until = `Closed && current = Xen_os.Device_state.Closed) || current = t then Lwt.return (Some current)
+      else
+        let next = next_state current t in
+        if until = `Connect && next = Xen_os.Device_state.Connected then Lwt.return None
+        else write next >>= fun () -> walk next t
+    in
+    let rec loop current seen =
+      if (until = `Closed && current = Xen_os.Device_state.Closed) then Lwt.return_unit
+      else
+        frontend_change xsc frontend seen >>= fun frontend_state ->
+        (match target frontend_state with
+          | Some t -> walk current t
+          | None -> Lwt.return (Some current))
+        >>= function
+        | None -> Lwt.return_unit
+        | Some current ->
+          removed xsc backend frontend_state >>= function
+          | true -> fail Client_gone
+          | false -> loop current (Some frontend_state)
+    in
+    loop current None
+
   (* Return the path of the frontend *)
   let frontend = function
   | `Client devid ->
@@ -160,27 +268,12 @@ module Make(Xs: Xs_client_lwt.S) = struct
   let read_frontend_configuration id =
     frontend id
     >>= fun frontend ->
+    backend id
+    >>= fun backend ->
     Xs.make ()
     >>= fun xsc ->
-    Xs.wait xsc (fun h ->
-      Lwt.catch
-        (fun () ->
-          Xs.read h (frontend / "state")
-          >>= fun state ->
-          let open Xen_os.Device_state in
-          match of_string state with
-          | Initialised | Connected -> return ()
-          | Unknown
-          | Initialising
-          | InitWait
-          | Closing
-          | Closed        (* XXX: stop waiting? *)
-          | Reconfigured  (* XXX: stop waiting? *)
-          | Reconfiguring -> fail Xs_protocol.Eagain
-        ) (function
-          | Xs_protocol.Enoent _ -> fail Xs_protocol.Eagain
-          | e -> fail e)
-    ) >>= fun () ->
+    Xs.(immediate xsc (fun h -> read_state h backend)) >>= fun current ->
+    follow xsc ~frontend ~backend ~until:`Connect current >>= fun () ->
     Xs.(immediate xsc
       (fun h ->
         read h (frontend / "tx-ring-ref")
@@ -348,15 +441,28 @@ module Make(Xs: Xs_client_lwt.S) = struct
   let disconnect_backend id =
     Xs.make ()
     >>= fun xsc ->
+    frontend id
+    >>= fun frontend ->
     backend id
-    >>= fun path ->
+    >>= fun backend ->
     Lwt.catch (fun () ->
-        Xs.(immediate xsc (fun h -> write h (path / "state") Xen_os.Device_state.(to_string Closed))) >>= fun _ ->
-        wait_for_frontend_closing id >>= fun () ->
-        Xs.(immediate xsc (fun h -> rm h path))
+        Xs.(immediate xsc (fun h -> read_state h backend)) >>= fun current ->
+        (match current with
+         (* Connected: the frontend went to Closing, and we're called by cleanup for disconnection -> move to Closing
+            InitWait: the frontend give up early -> move to Closing
+            Other states: we want to disconnect, follow the state machine from the current state *)
+         | InitWait | Connected ->
+           Xs.(immediate xsc (fun h -> write h (backend / "state") (Xen_os.Device_state.to_string Closing)))
+           >|= fun () -> Xen_os.Device_state.Closing
+         | s -> return s)
+        >>= fun current ->
+        follow xsc ~frontend ~backend ~until:`Closed current
       )
-      (fun ex ->
-         Log.warn (fun f -> f "XenStore error removing %S: %a" path Fmt.exn ex);
+      (function
+        | Client_gone
+        | Xs_protocol.Enoent _ -> return ()
+        | ex ->
+         Log.warn (fun f -> f "XenStore error removing %S: %a" frontend Fmt.exn ex);
          Lwt.return_unit
       )
 end
